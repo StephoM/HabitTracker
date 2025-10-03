@@ -48,19 +48,16 @@ const firebaseConfig = {
             if (user) {
                 userId = user.uid;
                 document.getElementById('userIdDisplay').textContent = `User ID: ${userId}`;
-                habitsCollectionRef = collection(db, `/artifacts/${appId}/users/${userId}/habits`);
+                // Use a simpler path for your standalone app
+                habitsCollectionRef = collection(db, `users/${userId}/habits`);
                 listenForHabitChanges();
             } else {
-                console.log("User is not signed in.");
-                 if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                    try {
-                        await signInWithCustomToken(auth, __initial_auth_token);
-                    } catch (error) {
-                        console.error("Error signing in with custom token:", error);
-                        await signInAnonymously(auth);
-                    }
-                } else {
+                // For a standalone app, just sign in the user anonymously
+                console.log("User is not signed in. Signing in anonymously.");
+                try {
                     await signInAnonymously(auth);
+                } catch (error) {
+                    console.error("Error signing in anonymously:", error);
                 }
             }
         });
@@ -192,7 +189,8 @@ const firebaseConfig = {
         const completeHabit = async (habitId) => {
              if (!habitsCollectionRef) return;
 
-            const habitRef = doc(db, `/artifacts/${appId}/users/${userId}/habits`, habitId);
+            // Use the simpler path for your standalone app
+            const habitRef = doc(db, `users/${userId}/habits`, habitId);
             const todayStr = new Date().toISOString().split('T')[0];
 
             try {
@@ -286,3 +284,4 @@ const firebaseConfig = {
 
 </body>
 </html>
+
