@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Habit Tracker</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script type="module">
+        // Firebase Imports
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, onSnapshot, doc, updateDoc, setDoc, getDoc, deleteDoc, query } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Tailwind CSS Configuration
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        inter: ['Inter', 'sans-serif'],
+                    },
+                },
+            },
+        };
+
+        // Firebase Configuration and Initialization
+        // For Firebase JS SDK v7.20.0 and later, measurementId is optional
+const firebaseConfig = {
+  apiKey: "AIzaSyCUjx4_f3T1MB2dPLo5qz0j6MyioLe7C4g",
+  authDomain: "my-habit-tracker-45de8.firebaseapp.com",
+  projectId: "my-habit-tracker-45de8",
+  storageBucket: "my-habit-tracker-45de8.firebasestorage.app",
+  messagingSenderId: "407465872845",
+  appId: "1:407465872845:web:d5a66af559761b6c3ec884",
+  measurementId: "G-WEW0GPWT6G"
+};
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const auth = getAuth(app);
+
+        let userId = null;
+        let habitsCollectionRef = null;
+        let habitsUnsubscribe = null;
+
+        // --- Authentication ---
+        onAuthStateChanged(auth, async (user) => {
+            if (user) {
+                userId = user.uid;
+                document.getElementById('userIdDisplay').textContent = `User ID: ${userId}`;
+                habitsCollectionRef = collection(db, `/artifacts/${appId}/users/${userId}/habits`);
+                listenForHabitChanges();
+            } else {
+                console.log("User is not signed in.");
+                 if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    try {
+                        await signInWithCustomToken(auth, __initial_auth_token);
+                    } catch (error) {
+                        console.error("Error signing in with custom token:", error);
+                        await signInAnonymously(auth);
+                    }
+                } else {
+                    await signInAnonymously(auth);
+                }
+            }
+        });
+
+
+        // --- DOM Elements ---
+        const habitInput = document.getElementById('habitInput');
+        const addHabitBtn = document.getElementById('addHabitBtn');
+        const habitsContainer = document.getElementById('habitsContainer');
+        const loadingSpinner = document.getElementById('loadingSpinner');
+
+        // --- Functions ---
+
+        /**
+         * Renders the list of habits to the DOM
+         * @param {Array<Object>} habits - An array of habit objects from Firestore
+         */
+        const renderHabits = (habits) => {
+            if (habits.length === 0) {
+                habitsContainer.innerHTML = `<p class="text-gray-500 text-center col-span-full">No habits added yet. Add one to get started!</p>`;
+                return;
+            }
+
+            habitsContainer.innerHTML = ''; // Clear previous habits
+            habits.forEach(habit => {
+                const today = new Date().toISOString().split('T')[0];
+                const isCompletedToday = habit.lastCompleted === today;
+
+                const habitElement = document.createElement('div');
+                habitElement.className = `habit-card p-5 rounded-xl shadow-md flex items-center justify-between transition-all duration-300 ${isCompletedToday ? 'bg-green-100 border-green-400' : 'bg-white border-gray-200'} border`;
+                habitElement.innerHTML = `
+                    <div class="flex items-center">
+                        <div class="streak-display mr-4 text-center">
+                            <div class="text-3xl font-bold text-orange-500">${habit.streak || 0}</div>
+                            <div class="text-xs text-gray-500 uppercase">Streak</div>
+                        </div>
+                        <div>
+                            <p class="font-semibold text-lg text-gray-800">${habit.name}</p>
+                            <p class="text-sm text-gray-500">Last completed: ${habit.lastCompleted ? new Date(habit.lastCompleted + 'T00:00:00').toLocaleDateString() : 'Never'}</p>
+                        </div>
+                    </div>
+                    <button data-id="${habit.id}" class="complete-btn p-3 rounded-full transition-colors duration-200 ${isCompletedToday ? 'bg-green-500 text-white cursor-not-allowed' : 'bg-gray-200 hover:bg-green-500 hover:text-white text-gray-700'}">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-check"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                    </button>
+                `;
+                habitsContainer.appendChild(habitElement);
+            });
+        };
+
+
+        /**
+         * Sets up a real-time listener for habit changes in Firestore
+         */
+        const listenForHabitChanges = () => {
+            if (habitsUnsubscribe) habitsUnsubscribe(); // Unsubscribe from previous listener
+            if (!habitsCollectionRef) return;
+            
+            loadingSpinner.classList.remove('hidden');
+
+            const q = query(habitsCollectionRef);
+            habitsUnsubscribe = onSnapshot(q, (snapshot) => {
+                const habits = [];
+                snapshot.forEach(doc => {
+                    habits.push({ id: doc.id, ...doc.data() });
+                });
+                renderHabits(habits);
+                loadingSpinner.classList.add('hidden');
+            }, (error) => {
+                console.error("Error fetching habits:", error);
+                habitsContainer.innerHTML = `<p class="text-red-500 text-center col-span-full">Error loading habits.</p>`;
+                loadingSpinner.classList.add('hidden');
+            });
+        };
+
+
+        /**
+         * Adds a new habit to Firestore
+         */
+        const addHabit = async () => {
+            const habitName = habitInput.value.trim();
+            if (habitName === '' || !habitsCollectionRef) {
+                return;
+            }
+
+            try {
+                await addDoc(habitsCollectionRef, {
+                    name: habitName,
+                    streak: 0,
+                    lastCompleted: null,
+                    createdAt: new Date().toISOString()
+                });
+                habitInput.value = ''; // Clear input field
+            } catch (error) {
+                console.error("Error adding habit: ", error);
+            }
+        };
+
+        /**
+         * Calculates the new streak based on the last completed date.
+         * @param {string|null} lastCompletedDate - The ISO string of the last completion date (YYYY-MM-DD).
+         * @param {number} currentStreak - The current streak count.
+         * @returns {number} The new streak count.
+         */
+        const calculateNewStreak = (lastCompletedDate, currentStreak) => {
+            if (!lastCompletedDate) {
+                return 1; // First time completing
+            }
+
+            const today = new Date();
+            const yesterday = new Date(today);
+            yesterday.setDate(today.getDate() - 1);
+            
+            const lastCompleted = new Date(lastCompletedDate + 'T00:00:00');
+
+            // If last completed was yesterday, increment streak
+            if (lastCompleted.toDateString() === yesterday.toDateString()) {
+                return currentStreak + 1;
+            }
+            
+            // If it wasn't yesterday, reset streak to 1
+            return 1;
+        };
+
+
+        /**
+         * Handles the completion of a habit
+         * @param {string} habitId - The ID of the habit to complete
+         */
+        const completeHabit = async (habitId) => {
+             if (!habitsCollectionRef) return;
+
+            const habitRef = doc(db, `/artifacts/${appId}/users/${userId}/habits`, habitId);
+            const todayStr = new Date().toISOString().split('T')[0];
+
+            try {
+                const habitDoc = await getDoc(habitRef);
+                if (!habitDoc.exists()) {
+                    console.error("Habit not found");
+                    return;
+                }
+                const habitData = habitDoc.data();
+
+                // Prevent multiple completions on the same day
+                if (habitData.lastCompleted === todayStr) {
+                    console.log("Habit already completed today.");
+                    return;
+                }
+                
+                const newStreak = calculateNewStreak(habitData.lastCompleted, habitData.streak);
+                
+                await updateDoc(habitRef, {
+                    lastCompleted: todayStr,
+                    streak: newStreak
+                });
+
+            } catch (error) {
+                console.error("Error completing habit: ", error);
+            }
+        };
+
+
+        // --- Event Listeners ---
+        addHabitBtn.addEventListener('click', addHabit);
+        habitInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                addHabit();
+            }
+        });
+
+        // Event delegation for complete buttons
+        habitsContainer.addEventListener('click', (e) => {
+            const completeButton = e.target.closest('.complete-btn');
+            if (completeButton) {
+                const habitId = completeButton.dataset.id;
+                completeHabit(habitId);
+            }
+        });
+
+    </script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800">
+
+    <div class="container mx-auto max-w-2xl p-4 sm:p-6 lg:p-8">
+        
+        <!-- Header -->
+        <header class="text-center mb-8">
+            <h1 class="text-4xl font-bold text-gray-900">Habit Tracker</h1>
+            <p class="text-gray-600 mt-2">Stay consistent and build better habits, one day at a time.</p>
+            <div id="userIdDisplay" class="text-xs text-gray-400 mt-4">Connecting...</div>
+        </header>
+
+        <!-- Add Habit Section -->
+        <div class="bg-white p-6 rounded-xl shadow-md mb-8">
+            <h2 class="text-xl font-semibold mb-4">Add a New Habit</h2>
+            <div class="flex flex-col sm:flex-row gap-4">
+                <input type="text" id="habitInput" placeholder="e.g., Read for 15 minutes" class="flex-grow p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition">
+                <button id="addHabitBtn" class="bg-blue-600 text-white font-semibold py-3 px-6 rounded-lg hover:bg-blue-700 transition-colors duration-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
+                    Add Habit
+                </button>
+            </div>
+        </div>
+
+        <!-- Habits List Section -->
+        <div>
+            <h2 class="text-2xl font-bold mb-4">My Habits</h2>
+             <div id="loadingSpinner" class="flex justify-center items-center py-8">
+                <svg class="animate-spin -ml-1 mr-3 h-8 w-8 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+            </div>
+            <div id="habitsContainer" class="grid grid-cols-1 gap-4">
+                <!-- Habit cards will be dynamically inserted here -->
+            </div>
+        </div>
+
+    </div>
+
+</body>
+</html>
